@@ -1,0 +1,19 @@
+define flow input rails $user_message
+  """Check each incoming message for sensitive data."""
+  $result = execute detect_sensitive_data_in_input
+  if $result.sensitive_data_detected
+    $warning = execute block_sensitive_input
+    bot refuse sensitive input $warning
+    stop
+
+define flow output rails $bot_message
+  """Redact any PII that leaked into the bot's response."""
+  $result = execute detect_sensitive_data_in_output
+  if $result.output_sensitive_data_detected
+    $bot_message = $result.redacted_bot_message
+
+define bot refuse sensitive input $warning
+  "$warning"
+
+define bot inform cannot share personal data
+  "I'm unable to share personal information. All PII is automatically detected and redacted for your safety."

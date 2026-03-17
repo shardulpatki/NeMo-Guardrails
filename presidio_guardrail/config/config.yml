@@ -1,0 +1,26 @@
+# NeMo Guardrails Configuration — Presidio PII Detection
+#
+# Swap the models section for your preferred LLM backend
+# (NVIDIA, HuggingFace, etc.). Entity types and confidence
+# threshold are configured in actions.py.
+
+models:
+  - type: main
+    engine: openai
+    model: gpt-4o-mini
+
+actions:
+  - name: detect_sensitive_data_in_input
+    file_name: actions.py
+  - name: detect_sensitive_data_in_output
+    file_name: actions.py
+  - name: block_sensitive_input
+    file_name: actions.py
+
+rails:
+  input:
+    flows:
+      - input rails $user_message
+  output:
+    flows:
+      - output rails $bot_message
