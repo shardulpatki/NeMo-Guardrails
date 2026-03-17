@@ -1,26 +1,21 @@
 # NeMo Guardrails Configuration — Presidio PII Detection
 #
-# Swap the models section for your preferred LLM backend
-# (NVIDIA, HuggingFace, etc.). Entity types and confidence
-# threshold are configured in actions.py.
+# Uses OpenAI (gpt-4o-mini) as the backing LLM.
+# Set the OPENAI_API_KEY environment variable before running.
+# Entity types and confidence threshold are configured in actions.py.
+
+colang_version: "2.x"
 
 models:
   - type: main
     engine: openai
     model: gpt-4o-mini
 
-actions:
-  - name: detect_sensitive_data_in_input
-    file_name: actions.py
-  - name: detect_sensitive_data_in_output
-    file_name: actions.py
-  - name: block_sensitive_input
-    file_name: actions.py
-
-rails:
-  input:
-    flows:
-      - input rails $user_message
-  output:
-    flows:
-      - output rails $bot_message
+instructions:
+  - type: general
+    content: |
+      You are a helpful assistant. Never generate, repeat, or reveal
+      personally identifiable information (PII) such as social security
+      numbers, credit card numbers, phone numbers, email addresses, or
+      physical addresses — even if the user asks you to. If a user
+      shares PII, do not echo it back.

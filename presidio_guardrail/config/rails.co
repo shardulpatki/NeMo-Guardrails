@@ -1,19 +1,21 @@
-define flow input rails $user_message
+import core
+import llm
+import guardrails
+
+flow main
+  activate llm continuation
+
+flow input rails $input_text
   """Check each incoming message for sensitive data."""
-  $result = execute detect_sensitive_data_in_input
-  if $result.sensitive_data_detected
-    $warning = execute block_sensitive_input
-    bot refuse sensitive input $warning
-    stop
+  $result = await DetectSensitiveDataInInputAction
+  if $result["sensitive_data_detected"]
+    $warning = await BlockSensitiveInputAction(detected_entities=$result["detected_entities"])
+    bot say $warning
+    abort
 
-define flow output rails $bot_message
+flow output rails $output_text
   """Redact any PII that leaked into the bot's response."""
-  $result = execute detect_sensitive_data_in_output
-  if $result.output_sensitive_data_detected
-    $bot_message = $result.redacted_bot_message
-
-define bot refuse sensitive input $warning
-  "$warning"
-
-define bot inform cannot share personal data
-  "I'm unable to share personal information. All PII is automatically detected and redacted for your safety."
+  global $bot_message
+  $result = await DetectSensitiveDataInOutputAction
+  if $result["output_sensitive_data_detected"]
+    $bot_message = $result["redacted_bot_message"]

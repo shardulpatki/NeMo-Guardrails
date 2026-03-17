@@ -14,15 +14,7 @@ from presidio_anonymizer import AnonymizerEngine
 from presidio_anonymizer.entities import OperatorConfig
 
 # ── NeMo Guardrails Imports ──────────────────────────────────────────────────
-try:
-    from nemoguardrails.actions import action
-except ImportError:
-    # Allow standalone usage (e.g. demo.py) without nemoguardrails installed.
-    def action(name: str):  # type: ignore[misc]
-        """No-op decorator fallback when nemoguardrails is not installed."""
-        def decorator(func):
-            return func
-        return decorator
+from nemoguardrails.actions import action
 
 # ── Configuration ────────────────────────────────────────────────────────────
 
@@ -147,7 +139,7 @@ def redact_pii(text: str) -> str:
 # ── NeMo Guardrails Action Functions ────────────────────────────────────────
 
 
-@action(name="detect_sensitive_data_in_input")
+@action(name="DetectSensitiveDataInInputAction")
 async def detect_sensitive_data_in_input(context: dict) -> dict:
     """Input rail action — scan the user message for PII.
 
@@ -167,7 +159,7 @@ async def detect_sensitive_data_in_input(context: dict) -> dict:
     }
 
 
-@action(name="detect_sensitive_data_in_output")
+@action(name="DetectSensitiveDataInOutputAction")
 async def detect_sensitive_data_in_output(context: dict) -> dict:
     """Output rail action — scan the bot response for PII.
 
@@ -187,10 +179,10 @@ async def detect_sensitive_data_in_output(context: dict) -> dict:
     }
 
 
-@action(name="block_sensitive_input")
-async def block_sensitive_input(context: dict) -> str:
+@action(name="BlockSensitiveInputAction")
+async def block_sensitive_input(detected_entities: list | None = None, context: dict | None = None) -> str:
     """Generate a user-facing warning listing the detected PII types."""
-    entities: list[dict] = context.get("detected_entities", [])
+    entities: list[dict] = detected_entities or (context or {}).get("detected_entities", [])
     entity_types = sorted({e["entity_type"] for e in entities})
     label = ", ".join(entity_types)
     return (

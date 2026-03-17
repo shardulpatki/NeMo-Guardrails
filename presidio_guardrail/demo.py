@@ -1,21 +1,40 @@
 """
-Presidio × NeMo Guardrails — Standalone CLI Demo
+Presidio × NeMo Guardrails — PII Detection Demo
 
-Demonstrates PII detection and redaction using Microsoft Presidio
-without requiring an LLM backend.
+Demonstrates PII detection and redaction running through the
+NeMo Guardrails pipeline with an OpenAI LLM (gpt-4o-mini).
+
+Flow: User Input → Input Rail (PII scan) → LLM → Output Rail (PII scan) → Response
 """
 
 from __future__ import annotations
 
 import io
-import json
+import os
 import sys
+
+from dotenv import load_dotenv
 
 # Ensure stdout handles Unicode on Windows
 if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
-from actions import detect_pii, redact_pii
+# ── Load .env and check for OpenAI API key ───────────────────────────────────
+load_dotenv()
+
+if not os.environ.get("OPENAI_API_KEY"):
+    print("ERROR: OPENAI_API_KEY is not set.")
+    print("Create a .env file in the presidio_guardrail/ directory with:")
+    print('  OPENAI_API_KEY=sk-...')
+    sys.exit(1)
+
+from nemoguardrails import LLMRails, RailsConfig
+
+from actions import (
+    detect_sensitive_data_in_input,
+    detect_sensitive_data_in_output,
+    block_sensitive_input,
+)
 
 # ── Sample Inputs ────────────────────────────────────────────────────────────
 
@@ -24,7 +43,7 @@ SAMPLE_INPUTS: list[str] = [
     "Please charge credit card 4111-1111-1111-1111, expiry 09/26.",
     "My SSN is 456-78-9012 and I live at 742 Evergreen Terrace.",
     "Call me at (212) 555-1234 or visit https://example.com/profile.",
-    "The project deadline was moved to next sprint.",  # Clean — no PII
+    "What is Python?",  # Clean — no PII, will get an LLM response
 ]
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -38,41 +57,46 @@ def pretty(title: str, width: int = 60) -> None:
     print("─" * width)
 
 
+def build_rails() -> LLMRails:
+    """Load config and create an LLMRails instance with registered actions."""
+    config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config")
+    config = RailsConfig.from_path(config_path)
+    rails = LLMRails(config)
+
+    rails.register_action(detect_sensitive_data_in_input, "DetectSensitiveDataInInputAction")
+    rails.register_action(detect_sensitive_data_in_output, "DetectSensitiveDataInOutputAction")
+    rails.register_action(block_sensitive_input, "BlockSensitiveInputAction")
+
+    return rails
+
+
 # ── Demo Runner ──────────────────────────────────────────────────────────────
 
 
 def run_demo() -> None:
     """Run the full demo: sample inputs then interactive mode."""
 
-    pretty("Presidio × NeMo Guardrails — PII Detection Demo")
+    pretty("Presidio × NeMo Guardrails — PII Detection Demo (with LLM)")
     print()
-    print("  Loading Presidio engines (first run loads spaCy model)...")
+    print("  Loading NeMo Guardrails config, Presidio engines, and OpenAI LLM...")
     print()
+
+    rails = build_rails()
 
     # ── Sample inputs ────────────────────────────────────────────────────────
     for i, text in enumerate(SAMPLE_INPUTS, 1):
         pretty(f"Sample {i}")
         print(f"  INPUT:  {text}")
 
-        entities = detect_pii(text)
-
-        if entities:
-            print(f"\n  ENTITIES ({len(entities)} found):")
-            print(f"  {json.dumps(entities, indent=2)}")
-            redacted = redact_pii(text)
-            print(f"\n  REDACTED: {redacted}")
-            entity_types = sorted({e['entity_type'] for e in entities})
-            print(
-                f"\n  🛡️  GUARDRAIL TRIGGERED — "
-                f"{len(entities)} entit{'y' if len(entities) == 1 else 'ies'} "
-                f"detected: {', '.join(entity_types)}"
-            )
-        else:
-            print("\n  ✅ CLEAN — no sensitive data detected")
+        response = rails.generate(
+            messages=[{"role": "user", "content": text}]
+        )
+        print(f"  OUTPUT: {response['content']}")
 
     # ── Interactive mode ─────────────────────────────────────────────────────
-    pretty("Interactive Mode")
-    print('  Type any text to scan for PII. Type "quit" to exit.\n')
+    pretty("Interactive Mode (LLM-backed)")
+    print('  Chat with the LLM. PII is blocked on input and redacted on output.')
+    print('  Type "quit" to exit.\n')
 
     while True:
         try:
@@ -87,22 +111,10 @@ def run_demo() -> None:
         if not user_input.strip():
             continue
 
-        entities = detect_pii(user_input)
-
-        if entities:
-            print(f"\n  ENTITIES ({len(entities)} found):")
-            print(f"  {json.dumps(entities, indent=2)}")
-            redacted = redact_pii(user_input)
-            print(f"\n  REDACTED: {redacted}")
-            entity_types = sorted({e['entity_type'] for e in entities})
-            print(
-                f"\n  🛡️  GUARDRAIL TRIGGERED — "
-                f"{len(entities)} entit{'y' if len(entities) == 1 else 'ies'} "
-                f"detected: {', '.join(entity_types)}"
-            )
-        else:
-            print("\n  ✅ CLEAN — no sensitive data detected")
-
+        response = rails.generate(
+            messages=[{"role": "user", "content": user_input}]
+        )
+        print(f"  {response['content']}")
         print()
 
     pretty("Demo complete")
