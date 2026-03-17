@@ -4,7 +4,7 @@ Presidio × NeMo Guardrails — PII Detection Demo
 Demonstrates PII detection and redaction running through the
 NeMo Guardrails pipeline with an OpenAI LLM (gpt-4o-mini).
 
-Flow: User Input → Input Rail (PII scan) → LLM → Output Rail (PII scan) → Response
+Flow: User Input → Input Rail (PII redaction via built-in Presidio) → LLM → Response
 """
 
 from __future__ import annotations
@@ -30,12 +30,6 @@ if not os.environ.get("OPENAI_API_KEY"):
 
 from nemoguardrails import LLMRails, RailsConfig
 
-from actions import (
-    detect_sensitive_data_in_input,
-    detect_sensitive_data_in_output,
-    block_sensitive_input,
-)
-
 # ── Sample Inputs ────────────────────────────────────────────────────────────
 
 SAMPLE_INPUTS: list[str] = [
@@ -58,15 +52,10 @@ def pretty(title: str, width: int = 60) -> None:
 
 
 def build_rails() -> LLMRails:
-    """Load config and create an LLMRails instance with registered actions."""
+    """Load config and create an LLMRails instance."""
     config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config")
     config = RailsConfig.from_path(config_path)
     rails = LLMRails(config)
-
-    rails.register_action(detect_sensitive_data_in_input, "DetectSensitiveDataInInputAction")
-    rails.register_action(detect_sensitive_data_in_output, "DetectSensitiveDataInOutputAction")
-    rails.register_action(block_sensitive_input, "BlockSensitiveInputAction")
-
     return rails
 
 
@@ -95,7 +84,7 @@ def run_demo() -> None:
 
     # ── Interactive mode ─────────────────────────────────────────────────────
     pretty("Interactive Mode (LLM-backed)")
-    print('  Chat with the LLM. PII is blocked on input and redacted on output.')
+    print('  Chat with the LLM. PII in your input is redacted before reaching the model.')
     print('  Type "quit" to exit.\n')
 
     while True:

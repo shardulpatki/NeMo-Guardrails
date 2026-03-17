@@ -2,7 +2,8 @@
 #
 # Uses OpenAI (gpt-4o-mini) as the backing LLM.
 # Set the OPENAI_API_KEY environment variable before running.
-# Entity types and confidence threshold are configured in actions.py.
+# Entity types and confidence threshold are configured below
+# using the built-in Presidio community rail integration.
 
 colang_version: "2.x"
 
@@ -11,6 +12,26 @@ models:
     engine: openai
     model: gpt-4o-mini
 
+rails:
+  config:
+    sensitive_data_detection:
+      input:
+        entities:
+          - PERSON
+          - EMAIL_ADDRESS
+          - PHONE_NUMBER
+          - CREDIT_CARD
+          - US_SSN
+          - IBAN_CODE
+          - IP_ADDRESS
+          - US_DRIVER_LICENSE
+          - US_PASSPORT
+          - LOCATION
+          - DATE_TIME
+          - NRP
+          - MEDICAL_LICENSE
+          - URL
+        score_threshold: 0.35
 instructions:
   - type: general
     content: |

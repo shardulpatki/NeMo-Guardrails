@@ -1,21 +1,10 @@
 import core
 import llm
 import guardrails
+import nemoguardrails.library.sensitive_data_detection
 
 flow main
   activate llm continuation
 
 flow input rails $input_text
-  """Check each incoming message for sensitive data."""
-  $result = await DetectSensitiveDataInInputAction
-  if $result["sensitive_data_detected"]
-    $warning = await BlockSensitiveInputAction(detected_entities=$result["detected_entities"])
-    bot say $warning
-    abort
-
-flow output rails $output_text
-  """Redact any PII that leaked into the bot's response."""
-  global $bot_message
-  $result = await DetectSensitiveDataInOutputAction
-  if $result["output_sensitive_data_detected"]
-    $bot_message = $result["redacted_bot_message"]
+  mask sensitive data on input
