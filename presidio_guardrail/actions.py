@@ -14,7 +14,15 @@ from presidio_anonymizer import AnonymizerEngine
 from presidio_anonymizer.entities import OperatorConfig
 
 # ── NeMo Guardrails Imports ──────────────────────────────────────────────────
-from nemoguardrails.actions import action
+try:
+    from nemoguardrails.actions import action
+except ImportError:
+    # Allow standalone usage (e.g. demo.py) without nemoguardrails installed.
+    def action(name: str):  # type: ignore[misc]
+        """No-op decorator fallback when nemoguardrails is not installed."""
+        def decorator(func):
+            return func
+        return decorator
 
 # ── Configuration ────────────────────────────────────────────────────────────
 
@@ -35,7 +43,7 @@ DETECT_ENTITIES: list[str] = [
     "URL",
 ]
 
-CONFIDENCE_THRESHOLD: float = 0.5  # Minimum score to flag an entity
+CONFIDENCE_THRESHOLD: float = 0.35  # Minimum score to flag an entity
 
 # ── Lazy Singleton Engines ───────────────────────────────────────────────────
 

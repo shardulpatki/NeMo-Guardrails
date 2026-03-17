@@ -74,7 +74,7 @@ To use this as a guardrail in your NeMo Guardrails project:
 
 ### Confidence Threshold
 
-Adjust `CONFIDENCE_THRESHOLD` in `actions.py` (default `0.5`).
+Adjust `CONFIDENCE_THRESHOLD` in `actions.py` (default `0.35`).
 
 - **Higher** (e.g. `0.7`) — fewer false positives, may miss borderline entities.
 - **Lower** (e.g. `0.3`) — catches more edge cases, increases false positives.

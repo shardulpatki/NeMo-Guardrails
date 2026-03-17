@@ -7,8 +7,13 @@ without requiring an LLM backend.
 
 from __future__ import annotations
 
+import io
 import json
 import sys
+
+# Ensure stdout handles Unicode on Windows
+if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
 from actions import detect_pii, redact_pii
 
@@ -17,9 +22,9 @@ from actions import detect_pii, redact_pii
 SAMPLE_INPUTS: list[str] = [
     "Hi, my name is Sarah Connor and my email is sarah@skynet.com.",
     "Please charge credit card 4111-1111-1111-1111, expiry 09/26.",
-    "My SSN is 123-45-6789 and I live at 742 Evergreen Terrace.",
-    "Call me at (555) 867-5309 or visit https://example.com/profile.",
-    "The quarterly report shows 15% growth.",  # Clean — no PII
+    "My SSN is 456-78-9012 and I live at 742 Evergreen Terrace.",
+    "Call me at (212) 555-1234 or visit https://example.com/profile.",
+    "The project deadline was moved to next sprint.",  # Clean — no PII
 ]
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
