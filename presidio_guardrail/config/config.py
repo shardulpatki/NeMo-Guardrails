@@ -48,7 +48,6 @@ async def mask_sensitive_data_with_tracing(
 
     with tracer.start_as_current_span("pii.mask_sensitive_data") as span:
         span.set_attribute("pii.source", source)
-        span.set_attribute("pii.original_text", text)
 
         # No entities configured — nothing to mask
         if len(options.entities) == 0:
@@ -67,6 +66,7 @@ async def mask_sensitive_data_with_tracing(
             text=text,
             language="en",
             entities=options.entities,
+            score_threshold=options.score_threshold,
             ad_hoc_recognizers=_get_ad_hoc_recognizers(sdd_config),
         )
 

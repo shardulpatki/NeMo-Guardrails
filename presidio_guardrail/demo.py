@@ -125,7 +125,6 @@ def build_rails() -> LLMRails:
 def generate_with_tracing(rails: LLMRails, user_input: str) -> str:
     """Run rails.generate wrapped in an OpenTelemetry span."""
     with tracer.start_as_current_span("guardrails.generate") as span:
-        span.set_attribute("input.text", user_input)
         span.set_attribute("input.length", len(user_input))
 
         try:
