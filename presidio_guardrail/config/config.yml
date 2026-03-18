@@ -7,6 +7,10 @@
 
 colang_version: "2.x"
 
+# Note: NeMo Guardrails v0.21.0 built-in tracing (config.tracing) is incompatible
+# with Colang 2.x due to its dependency on Colang 1.0 log options.
+# Application-level OpenTelemetry tracing is configured in demo.py instead.
+
 models:
   - type: main
     engine: openai
