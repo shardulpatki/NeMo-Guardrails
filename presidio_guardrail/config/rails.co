@@ -8,3 +8,9 @@ flow main
 
 flow input rails $input_text
   mask sensitive data on input
+
+@override
+flow mask sensitive data on input
+  """Mask PII with detailed tracing."""
+  global $user_message
+  $user_message = await MaskSensitiveDataWithTracingAction(source="input", text=$user_message)
