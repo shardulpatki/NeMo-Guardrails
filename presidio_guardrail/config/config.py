@@ -16,6 +16,13 @@ from nemoguardrails.library.sensitive_data_detection.actions import (
 tracer = trace.get_tracer("presidio_guardrail.pii")
 
 
+def _partial_mask(value: str, visible: int = 3) -> str:
+    """Show first `visible` chars, mask the rest with '*'."""
+    if len(value) <= visible:
+        return "*" * len(value)
+    return value[:visible] + "*" * (len(value) - visible)
+
+
 def init(app):
     """Register the custom PII tracing action with NeMo Guardrails."""
     app.register_action(mask_sensitive_data_with_tracing, "mask_sensitive_data_with_tracing")
@@ -70,7 +77,7 @@ async def mask_sensitive_data_with_tracing(
 
         # Extract per-entity details
         entity_types = [r.entity_type for r in results]
-        entity_originals = [text[r.start:r.end] for r in results]
+        entity_originals = [_partial_mask(text[r.start:r.end]) for r in results]
         entity_replacements = [f"<{r.entity_type}>" for r in results]
         entity_scores = [r.score for r in results]
 
