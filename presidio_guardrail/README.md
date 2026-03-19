@@ -55,12 +55,35 @@ User Message
 ## Quick Start
 
 ```bash
+cd presidio_guardrail
 pip install -r requirements.txt
 python -m spacy download en_core_web_lg
+```
+
+Create a `.env` file (see `.env.example`):
+
+```
+OPENAI_API_KEY=sk-...
+```
+
+### Run the CLI Demo
+
+```bash
 python demo.py
 ```
 
-The demo runs five sample inputs through Presidio detection and redaction, then drops into an interactive mode where you can type arbitrary text.
+Runs five sample inputs through Presidio detection and redaction, then drops into interactive mode. Traces are written to `logs/traces.jsonl`.
+
+### Run the Streamlit UI
+
+```bash
+streamlit run streamlit_app.py
+```
+
+Opens an interactive web app at `http://localhost:8501` with two tabs:
+
+- **Scanner** — paste or select sample text, adjust the confidence threshold and entity types via the sidebar, and see highlighted PII with redacted output.
+- **Chat Simulation** — simulates a conversation where the guardrail intercepts PII before it reaches the LLM. Uses the OpenAI API when `OPENAI_API_KEY` is set, otherwise returns simulated responses.
 
 ## NeMo Guardrails Integration
 
@@ -70,11 +93,21 @@ To use this as a guardrail in your NeMo Guardrails project:
 2. Copy `config/config.yml` and `config/rails.co` into your config folder.
 3. The rails will automatically activate on every user/bot message.
 
+## Tracing (OpenTelemetry)
+
+The project includes custom OpenTelemetry instrumentation (NeMo's built-in `config.tracing` is incompatible with Colang 2.x).
+
+- **Service name:** `nemo-guardrails-presidio-demo`
+- **Exporters:** Console + `FileSpanExporter` (writes to `logs/traces.jsonl`)
+- **Span attributes:** redacted text, entity count, entity types, confidence scores, partial-masked originals (first 3 characters visible), and replacements.
+
+Tracing is configured in `config/config.py` and emitted from the custom action in `actions.py`.
+
 ## Configuration
 
 ### Confidence Threshold
 
-Adjust `CONFIDENCE_THRESHOLD` in `actions.py` (default `0.35`).
+The default threshold is `0.35` (set in `config/config.yml`). In the Streamlit UI you can adjust it dynamically via the sidebar slider.
 
 - **Higher** (e.g. `0.7`) — fewer false positives, may miss borderline entities.
 - **Lower** (e.g. `0.3`) — catches more edge cases, increases false positives.
@@ -83,11 +116,11 @@ Regex-based recognizers (SSN, credit card, email) typically score `0.85–1.0`. 
 
 ### Entity Types
 
-Edit the `DETECT_ENTITIES` list in `actions.py` to add or remove entity types.
+The 14 detected entity types are configured in `config/config.yml` under `rails.config.sensitive_data_detection`. In the Streamlit UI you can toggle individual entity types on/off.
 
 ### LLM Backend
 
-Change the `models` section in `config/config.yml` to point at your preferred backend (OpenAI, NVIDIA, HuggingFace, etc.).
+Change the `models` section in `config/config.yml` to point at your preferred backend (OpenAI, NVIDIA, HuggingFace, etc.). The default is `gpt-4o-mini`.
 
 ### Custom Recognizers
 
@@ -97,11 +130,16 @@ Add domain-specific patterns (e.g. internal employee IDs, project codes) via Pre
 
 ```
 presidio_guardrail/
-├── actions.py            # Presidio detection + NeMo @action functions
-├── demo.py               # Standalone CLI demo (no LLM needed)
+├── actions.py            # Presidio detection + NeMo @action functions + tracing
+├── demo.py               # CLI demo with LLM and OpenTelemetry tracing
+├── streamlit_app.py      # Interactive Streamlit web UI
 ├── requirements.txt      # Python dependencies
+├── .env.example          # Example environment variables
 ├── README.md             # This file
-└── config/
-    ├── config.yml        # NeMo Guardrails YAML configuration
-    └── rails.co          # Colang 2.x rail definitions
+├── config/
+│   ├── config.yml        # NeMo Guardrails YAML configuration
+│   ├── config.py         # Custom OpenTelemetry tracing setup
+│   └── rails.co          # Colang 2.x rail definitions
+└── logs/
+    └── traces.jsonl      # OpenTelemetry trace output (git-ignored)
 ```
