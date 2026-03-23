@@ -14,6 +14,7 @@ from nemoguardrails.library.sensitive_data_detection.actions import (
 )
 
 from logging_config import get_logger
+import pii_results
 
 tracer = trace.get_tracer("presidio_guardrail.pii")
 logger = get_logger("config.pii_action")
@@ -87,6 +88,21 @@ async def mask_sensitive_data_with_tracing(
         span.set_attribute("pii.entity_originals", entity_originals)
         span.set_attribute("pii.entity_replacements", entity_replacements)
         span.set_attribute("pii.entity_scores", entity_scores)
+
+        # Store results for the Streamlit UI to retrieve after rails.generate()
+        pii_results.store_scan_results(
+            entities=[
+                {
+                    "entity_type": r.entity_type,
+                    "start": r.start,
+                    "end": r.end,
+                    "score": round(r.score, 3),
+                    "text": text[r.start : r.end],
+                }
+                for r in sorted(results, key=lambda x: x.start)
+            ],
+            redacted_text=masked_results.text,
+        )
 
         logger.info(
             "PII detection: %d entities, types=%s, scores=%s",

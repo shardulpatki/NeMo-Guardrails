@@ -115,13 +115,6 @@ SAMPLE_TEXTS = [
     "What is Python?",
 ]
 
-ASSISTANT_RESPONSES = [
-    "I understand you'd like help, but I can't process personal information. How else can I assist you?",
-    "I've received your message. For security, any sensitive data was redacted before I saw it. How can I help?",
-    "Thanks for your message! I'm here to help with questions and tasks. What would you like to know?",
-    "I can help with that! Let me provide some information on the topic.",
-]
-
 
 def scan_text(text: str, threshold: float, entities: list[str]):
     """Run Presidio analysis and anonymization with given settings."""
@@ -337,9 +330,10 @@ with chat_tab:
             st.rerun()
 
     if not has_api_key:
-        st.warning(
-            "\u26a0\ufe0f `OPENAI_API_KEY` not set \u2014 chat will use simulated responses. "
-            "Set the key in `.env` for real LLM responses via NeMo Guardrails."
+        st.error(
+            "\u26a0\ufe0f `OPENAI_API_KEY` not set \u2014 the Chat tab requires an API key "
+            "because all messages are routed through the NeMo Guardrails pipeline. "
+            "Set the key in `.env` to enable chat."
         )
 
     # Render chat history
@@ -357,15 +351,28 @@ with chat_tab:
             with st.chat_message(msg["role"]):
                 st.write(msg["content"])
 
-    # Chat input
-    if prompt := st.chat_input("Type a message\u2026"):
+    # Chat input (requires API key — all messages go through NeMo Guardrails)
+    if prompt := st.chat_input("Type a message\u2026", disabled=not has_api_key):
+        from pii_results import get_last_scan_results
+
         st.session_state.chat_history.append({"role": "user", "content": prompt})
 
         with tracer.start_as_current_span("streamlit.chat_message") as span:
             span.set_attribute("chat.input_length", len(prompt))
 
-            # PII detection using sidebar settings
-            pii_entities, redacted_text = scan_text(prompt, threshold, selected_entities)
+            # Route through NeMo Guardrails (PII detection happens inside the input rail)
+            try:
+                rails = load_rails()
+                response = rails.generate(
+                    messages=[{"role": "user", "content": prompt}]
+                )
+                assistant_text = response["content"]
+            except Exception as e:
+                logger.exception("NeMo Guardrails chat error")
+                assistant_text = f"Error from NeMo Guardrails: {e}"
+
+            # Retrieve PII results that the input rail stored during generate()
+            pii_entities, redacted_text = get_last_scan_results()
 
             span.set_attribute("chat.has_pii", bool(pii_entities))
             span.set_attribute("chat.pii_entity_count", len(pii_entities))
@@ -374,7 +381,7 @@ with chat_tab:
                 types_found = list({e["entity_type"] for e in pii_entities})
                 guardrail_content = (
                     f"**\U0001f6e1\ufe0f PII Detected** \u2014 Found {len(pii_entities)} entit{'y' if len(pii_entities) == 1 else 'ies'} "
-                    f"({', '.join(types_found)}). Input will be redacted before reaching the LLM."
+                    f"({', '.join(types_found)}). Input was redacted before reaching the LLM."
                 )
                 st.session_state.chat_history.append({
                     "role": "guardrail",
@@ -386,22 +393,6 @@ with chat_tab:
                     len(pii_entities),
                     types_found,
                 )
-
-            # Generate response
-            if has_api_key:
-                try:
-                    rails = load_rails()
-                    # Note: Colang 2.x does not support the "log" option.
-                    response = rails.generate(
-                        messages=[{"role": "user", "content": prompt}]
-                    )
-                    assistant_text = response["content"]
-                except Exception as e:
-                    logger.exception("NeMo Guardrails chat error")
-                    assistant_text = f"Error from NeMo Guardrails: {e}"
-            else:
-                idx = len(st.session_state.chat_history) % len(ASSISTANT_RESPONSES)
-                assistant_text = ASSISTANT_RESPONSES[idx]
 
             span.set_attribute("chat.response_length", len(assistant_text))
             logger.info("Chat response generated, length=%d", len(assistant_text))
