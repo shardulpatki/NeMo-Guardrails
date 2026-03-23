@@ -1,4 +1,4 @@
-"""Streamlit UI for Presidio × NeMo Guardrails PII Detection Demo."""
+"""Streamlit UI for Presidio x NeMo Guardrails PII Detection Demo."""
 
 from __future__ import annotations
 
@@ -10,14 +10,23 @@ from dotenv import load_dotenv
 from presidio_anonymizer.entities import OperatorConfig
 
 import actions
+from logging_config import setup_logging, get_logger
+from tracing_config import setup_tracing, get_tracer
 
 load_dotenv()
+
+# ── Logging & Tracing Setup (idempotent for Streamlit reruns) ────────────────
+
+setup_logging()
+setup_tracing("nemo-guardrails-presidio-ui")
+logger = get_logger("streamlit_app")
+tracer = get_tracer("streamlit_app")
 
 # ── Page config ──────────────────────────────────────────────────────────────
 
 st.set_page_config(
-    page_title="Presidio × NeMo Guardrails",
-    page_icon="🛡️",
+    page_title="Presidio \u00d7 NeMo Guardrails",
+    page_icon="\U0001f6e1\ufe0f",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -83,12 +92,15 @@ def load_rails():
     return LLMRails(config)
 
 
-try:
-    analyzer = load_analyzer()
-    anonymizer = load_anonymizer()
-except Exception as e:
-    st.error(f"Failed to load Presidio engines. Is spaCy `en_core_web_lg` installed?\n\n{e}")
-    st.stop()
+with tracer.start_as_current_span("streamlit.load_engines"):
+    try:
+        analyzer = load_analyzer()
+        anonymizer = load_anonymizer()
+        logger.info("Presidio engines loaded successfully")
+    except Exception as e:
+        logger.error("Failed to load Presidio engines", exc_info=True)
+        st.error(f"Failed to load Presidio engines. Is spaCy `en_core_web_lg` installed?\n\n{e}")
+        st.stop()
 
 has_api_key = bool(os.environ.get("OPENAI_API_KEY"))
 
@@ -113,26 +125,44 @@ ASSISTANT_RESPONSES = [
 
 def scan_text(text: str, threshold: float, entities: list[str]):
     """Run Presidio analysis and anonymization with given settings."""
-    results = analyzer.analyze(
-        text=text,
-        language="en",
-        entities=entities,
-        score_threshold=threshold,
-    )
-    operators = {e: OperatorConfig("replace") for e in entities}
-    masked = anonymizer.anonymize(text=text, analyzer_results=results, operators=operators)
+    with tracer.start_as_current_span("streamlit.scan_text") as span:
+        span.set_attribute("scan.text_length", len(text))
+        span.set_attribute("scan.threshold", threshold)
+        span.set_attribute("scan.entity_types_requested", len(entities))
 
-    entities_list = [
-        {
-            "entity_type": r.entity_type,
-            "start": r.start,
-            "end": r.end,
-            "score": round(r.score, 3),
-            "text": text[r.start : r.end],
-        }
-        for r in sorted(results, key=lambda x: x.start)
-    ]
-    return entities_list, masked.text
+        results = analyzer.analyze(
+            text=text,
+            language="en",
+            entities=entities,
+            score_threshold=threshold,
+        )
+        operators = {e: OperatorConfig("replace") for e in entities}
+        masked = anonymizer.anonymize(text=text, analyzer_results=results, operators=operators)
+
+        entities_list = [
+            {
+                "entity_type": r.entity_type,
+                "start": r.start,
+                "end": r.end,
+                "score": round(r.score, 3),
+                "text": text[r.start : r.end],
+            }
+            for r in sorted(results, key=lambda x: x.start)
+        ]
+
+        span.set_attribute("scan.entities_found", len(entities_list))
+        span.set_attribute(
+            "scan.entity_types_detected",
+            list({e["entity_type"] for e in entities_list}),
+        )
+        logger.info(
+            "Scan: length=%d, threshold=%.2f, found=%d entities",
+            len(text),
+            threshold,
+            len(entities_list),
+        )
+
+        return entities_list, masked.text
 
 
 def build_highlighted_html(text: str, entities: list[dict]) -> str:
@@ -212,18 +242,18 @@ with st.sidebar:
 
 # ── Tabs ─────────────────────────────────────────────────────────────────────
 
-scanner_tab, chat_tab = st.tabs(["🔍 Scanner", "💬 Chat Simulation"])
+scanner_tab, chat_tab = st.tabs(["\U0001f50d Scanner", "\U0001f4ac Chat Simulation"])
 
 # ── Scanner Tab ──────────────────────────────────────────────────────────────
 
 with scanner_tab:
-    st.title("🛡️ Sensitive Data Detection Guardrail")
+    st.title("\U0001f6e1\ufe0f Sensitive Data Detection Guardrail")
     st.caption("Inspect what the Presidio detection engine finds in your text")
 
     # Sample buttons
     cols = st.columns(6)
     for i, (col, sample) in enumerate(zip(cols, SAMPLE_TEXTS)):
-        label = sample[:28] + "…" if len(sample) > 30 else sample
+        label = sample[:28] + "\u2026" if len(sample) > 30 else sample
         if col.button(label, key=f"sample_{i}", use_container_width=True):
             st.session_state.input_text = sample
             st.session_state.scan_results = None
@@ -233,16 +263,16 @@ with scanner_tab:
         "Enter text to scan",
         key="input_text",
         height=120,
-        placeholder="Type or paste text here, or click a sample above…",
+        placeholder="Type or paste text here, or click a sample above\u2026",
     )
 
-    if st.button("🔍 Scan for Sensitive Data", type="primary", use_container_width=True):
+    if st.button("\U0001f50d Scan for Sensitive Data", type="primary", use_container_width=True):
         if not text_input.strip():
             st.warning("Please enter some text to scan.")
         elif not selected_entities:
             st.warning("Please select at least one entity type.")
         else:
-            with st.spinner("Scanning…"):
+            with st.spinner("Scanning\u2026"):
                 entities_found, redacted_text = scan_text(
                     text_input, threshold, selected_entities
                 )
@@ -264,8 +294,8 @@ with scanner_tab:
             m1, m2, m3, m4 = st.columns(4)
             m1.metric("Entities found", len(ents))
             m2.metric("Unique types", len(unique_types))
-            m3.metric("Confidence range", f"{min(scores):.2f} – {max(scores):.2f}")
-            m4.metric("Guardrail action", "🚫 BLOCK PII")
+            m3.metric("Confidence range", f"{min(scores):.2f} \u2013 {max(scores):.2f}")
+            m4.metric("Guardrail action", "\U0001f6ab BLOCK PII")
 
             st.subheader("Detected PII")
             st.markdown(
@@ -287,12 +317,12 @@ with scanner_tab:
             df.columns = ["Entity Type", "Start", "End", "Score", "Text"]
             st.dataframe(df, use_container_width=True, hide_index=True)
         else:
-            st.success("✅ No sensitive data detected — message passes through to LLM")
+            st.success("\u2705 No sensitive data detected \u2014 message passes through to LLM")
 
 # ── Chat Simulation Tab ─────────────────────────────────────────────────────
 
 with chat_tab:
-    st.title("💬 NeMo Guardrails Chat Simulation")
+    st.title("\U0001f4ac NeMo Guardrails Chat Simulation")
 
     st.info(
         "This demonstrates the **NeMo Guardrails pipeline**. "
@@ -302,20 +332,20 @@ with chat_tab:
     # Clear chat button
     col_spacer, col_clear = st.columns([5, 1])
     with col_clear:
-        if st.button("🗑️ Clear chat", use_container_width=True):
+        if st.button("\U0001f5d1\ufe0f Clear chat", use_container_width=True):
             st.session_state.chat_history = []
             st.rerun()
 
     if not has_api_key:
         st.warning(
-            "⚠️ `OPENAI_API_KEY` not set — chat will use simulated responses. "
+            "\u26a0\ufe0f `OPENAI_API_KEY` not set \u2014 chat will use simulated responses. "
             "Set the key in `.env` for real LLM responses via NeMo Guardrails."
         )
 
     # Render chat history
     for msg in st.session_state.chat_history:
         if msg["role"] == "guardrail":
-            with st.chat_message("assistant", avatar="🛡️"):
+            with st.chat_message("assistant", avatar="\U0001f6e1\ufe0f"):
                 st.markdown(
                     f'<div class="guardrail-msg">{msg["content"]}</div>',
                     unsafe_allow_html=True,
@@ -328,37 +358,53 @@ with chat_tab:
                 st.write(msg["content"])
 
     # Chat input
-    if prompt := st.chat_input("Type a message…"):
+    if prompt := st.chat_input("Type a message\u2026"):
         st.session_state.chat_history.append({"role": "user", "content": prompt})
 
-        # PII detection using sidebar settings
-        pii_entities, redacted_text = scan_text(prompt, threshold, selected_entities)
+        with tracer.start_as_current_span("streamlit.chat_message") as span:
+            span.set_attribute("chat.input_length", len(prompt))
 
-        if pii_entities:
-            types_found = list({e["entity_type"] for e in pii_entities})
-            guardrail_content = (
-                f"**🛡️ PII Detected** — Found {len(pii_entities)} entit{'y' if len(pii_entities) == 1 else 'ies'} "
-                f"({', '.join(types_found)}). Input will be redacted before reaching the LLM."
-            )
-            st.session_state.chat_history.append({
-                "role": "guardrail",
-                "content": guardrail_content,
-                "redacted": redacted_text,
-            })
+            # PII detection using sidebar settings
+            pii_entities, redacted_text = scan_text(prompt, threshold, selected_entities)
 
-        # Generate response
-        if has_api_key:
-            try:
-                rails = load_rails()
-                response = rails.generate(
-                    messages=[{"role": "user", "content": prompt}]
+            span.set_attribute("chat.has_pii", bool(pii_entities))
+            span.set_attribute("chat.pii_entity_count", len(pii_entities))
+
+            if pii_entities:
+                types_found = list({e["entity_type"] for e in pii_entities})
+                guardrail_content = (
+                    f"**\U0001f6e1\ufe0f PII Detected** \u2014 Found {len(pii_entities)} entit{'y' if len(pii_entities) == 1 else 'ies'} "
+                    f"({', '.join(types_found)}). Input will be redacted before reaching the LLM."
                 )
-                assistant_text = response["content"]
-            except Exception as e:
-                assistant_text = f"Error from NeMo Guardrails: {e}"
-        else:
-            idx = len(st.session_state.chat_history) % len(ASSISTANT_RESPONSES)
-            assistant_text = ASSISTANT_RESPONSES[idx]
+                st.session_state.chat_history.append({
+                    "role": "guardrail",
+                    "content": guardrail_content,
+                    "redacted": redacted_text,
+                })
+                logger.info(
+                    "Chat: pii=%d entities, types=%s",
+                    len(pii_entities),
+                    types_found,
+                )
+
+            # Generate response
+            if has_api_key:
+                try:
+                    rails = load_rails()
+                    # Note: Colang 2.x does not support the "log" option.
+                    response = rails.generate(
+                        messages=[{"role": "user", "content": prompt}]
+                    )
+                    assistant_text = response["content"]
+                except Exception as e:
+                    logger.exception("NeMo Guardrails chat error")
+                    assistant_text = f"Error from NeMo Guardrails: {e}"
+            else:
+                idx = len(st.session_state.chat_history) % len(ASSISTANT_RESPONSES)
+                assistant_text = ASSISTANT_RESPONSES[idx]
+
+            span.set_attribute("chat.response_length", len(assistant_text))
+            logger.info("Chat response generated, length=%d", len(assistant_text))
 
         st.session_state.chat_history.append({
             "role": "assistant",
