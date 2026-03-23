@@ -1,22 +1,21 @@
 """
-Presidio × NeMo Guardrails — PII Detection Demo
+Presidio x NeMo Guardrails — PII Detection Demo
 
 Demonstrates PII detection and redaction running through the
 NeMo Guardrails pipeline with an OpenAI LLM (gpt-4o-mini).
 
-Flow: User Input → Input Rail (PII redaction via built-in Presidio) → LLM → Response
+Flow: User Input -> Input Rail (PII redaction via built-in Presidio) -> LLM -> Response
 
 Tracing: OpenTelemetry spans are emitted for every guardrail call and
-written to both the console and ./logs/traces.jsonl.
+written to ./logs/traces.jsonl.
+Logging: Structured logs with trace correlation are written to ./logs/app.log.
 """
 
 from __future__ import annotations
 
 import io
-import json
 import os
 import sys
-import time
 
 from dotenv import load_dotenv
 
@@ -27,68 +26,23 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
 # ── Load .env and check for OpenAI API key ───────────────────────────────────
 load_dotenv()
 
+# ── Logging & Tracing Setup ──────────────────────────────────────────────────
+from logging_config import setup_logging, get_logger
+from tracing_config import setup_tracing, get_tracer, TRACE_LOG_PATH
+
+setup_logging()
+provider = setup_tracing("nemo-guardrails-presidio-demo")
+logger = get_logger("demo")
+tracer = get_tracer("presidio_guardrail")
+
+from opentelemetry.trace import StatusCode
+
 if not os.environ.get("OPENAI_API_KEY"):
+    logger.error("OPENAI_API_KEY is not set. Create a .env file with: OPENAI_API_KEY=sk-...")
     print("ERROR: OPENAI_API_KEY is not set.")
     print("Create a .env file in the presidio_guardrail/ directory with:")
     print('  OPENAI_API_KEY=sk-...')
     sys.exit(1)
-
-# ── OpenTelemetry Tracing Setup ──────────────────────────────────────────────
-from opentelemetry import trace
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import (
-    BatchSpanProcessor,
-    ConsoleSpanExporter,
-    SimpleSpanProcessor,
-    SpanExporter,
-    SpanExportResult,
-)
-from opentelemetry.sdk.resources import Resource
-from opentelemetry.trace import StatusCode
-
-TRACE_LOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs", "traces.jsonl")
-os.makedirs(os.path.dirname(TRACE_LOG_PATH), exist_ok=True)
-
-
-class FileSpanExporter(SpanExporter):
-    """Writes completed spans as JSON lines to a file."""
-
-    def __init__(self, filepath: str):
-        self._filepath = filepath
-
-    def export(self, spans):
-        with open(self._filepath, "a", encoding="utf-8") as f:
-            for span in spans:
-                record = {
-                    "name": span.name,
-                    "trace_id": format(span.context.trace_id, "032x"),
-                    "span_id": format(span.context.span_id, "016x"),
-                    "parent_span_id": (
-                        format(span.parent.span_id, "016x") if span.parent else None
-                    ),
-                    "start_time": span.start_time,
-                    "end_time": span.end_time,
-                    "duration_ms": (
-                        (span.end_time - span.start_time) / 1e6
-                        if span.end_time and span.start_time
-                        else None
-                    ),
-                    "status": span.status.status_code.name,
-                    "attributes": dict(span.attributes) if span.attributes else {},
-                }
-                f.write(json.dumps(record) + "\n")
-        return SpanExportResult.SUCCESS
-
-    def shutdown(self):
-        pass
-
-
-resource = Resource.create({"service.name": "nemo-guardrails-presidio-demo"})
-provider = TracerProvider(resource=resource)
-provider.add_span_processor(SimpleSpanProcessor(ConsoleSpanExporter()))
-provider.add_span_processor(SimpleSpanProcessor(FileSpanExporter(TRACE_LOG_PATH)))
-trace.set_tracer_provider(provider)
-tracer = trace.get_tracer("presidio_guardrail")
 
 # ── NeMo Guardrails ──────────────────────────────────────────────────────────
 from nemoguardrails import LLMRails, RailsConfig
@@ -109,9 +63,9 @@ SAMPLE_INPUTS: list[str] = [
 def pretty(title: str, width: int = 60) -> None:
     """Print a formatted section header with separator lines."""
     print()
-    print("─" * width)
+    print("\u2500" * width)
     print(f"  {title}")
-    print("─" * width)
+    print("\u2500" * width)
 
 
 def build_rails() -> LLMRails:
@@ -126,19 +80,27 @@ def generate_with_tracing(rails: LLMRails, user_input: str) -> str:
     """Run rails.generate wrapped in an OpenTelemetry span."""
     with tracer.start_as_current_span("guardrails.generate") as span:
         span.set_attribute("input.length", len(user_input))
+        logger.info("Generating response, input_length=%d", len(user_input))
 
         try:
+            # Note: Colang 2.x does not support the "log" option in rails.generate().
+            # NeMo internal logging is captured via Python logging instead.
             response = rails.generate(
                 messages=[{"role": "user", "content": user_input}]
             )
             output = response["content"]
-            span.set_attribute("output.text", output)
+
+            # Only log output text if explicitly opted in (PII safety)
+            if os.environ.get("TRACE_LOG_OUTPUT_TEXT", "").lower() == "true":
+                span.set_attribute("output.text", output)
             span.set_attribute("output.length", len(output))
             span.set_status(StatusCode.OK)
+            logger.info("Response generated, output_length=%d", len(output))
             return output
         except Exception as exc:
             span.set_status(StatusCode.ERROR, str(exc))
             span.record_exception(exc)
+            logger.exception("Error during rails.generate")
             raise
 
 
@@ -148,18 +110,21 @@ def generate_with_tracing(rails: LLMRails, user_input: str) -> str:
 def run_demo() -> None:
     """Run the full demo: sample inputs then interactive mode."""
 
-    pretty("Presidio × NeMo Guardrails — PII Detection Demo (with LLM)")
+    pretty("Presidio \u00d7 NeMo Guardrails \u2014 PII Detection Demo (with LLM)")
+    logger.info("Starting demo, loading NeMo Guardrails config...")
     print()
     print("  Loading NeMo Guardrails config, Presidio engines, and OpenAI LLM...")
     print()
 
     with tracer.start_as_current_span("demo.init"):
         rails = build_rails()
+    logger.info("Rails initialized successfully")
 
     # ── Sample inputs ────────────────────────────────────────────────────────
     for i, text in enumerate(SAMPLE_INPUTS, 1):
         pretty(f"Sample {i}")
         print(f"  INPUT:  {text}")
+        logger.info("Processing sample %d/%d", i, len(SAMPLE_INPUTS))
 
         output = generate_with_tracing(rails, text)
         print(f"  OUTPUT: {output}")
@@ -168,6 +133,7 @@ def run_demo() -> None:
     pretty("Interactive Mode (LLM-backed)")
     print('  Chat with the LLM. PII in your input is redacted before reaching the model.')
     print('  Type "quit" to exit.\n')
+    logger.info("Entering interactive mode")
 
     while True:
         try:
@@ -188,6 +154,7 @@ def run_demo() -> None:
 
     pretty("Demo complete")
     print(f"\n  Trace log written to: {TRACE_LOG_PATH}\n")
+    logger.info("Demo complete, trace log at %s", TRACE_LOG_PATH)
 
     # Flush remaining spans
     provider.shutdown()

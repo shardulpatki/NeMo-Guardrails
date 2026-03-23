@@ -15,6 +15,7 @@ models:
   - type: main
     engine: openai
     model: gpt-4o-mini
+    output_parser: verbose_v1
 
 rails:
   config:
@@ -36,11 +37,4 @@ rails:
           - MEDICAL_LICENSE
           - URL
         score_threshold: 0.35
-instructions:
-  - type: general
-    content: |
-      You are a helpful assistant. Never generate, repeat, or reveal
-      personally identifiable information (PII) such as social security
-      numbers, credit card numbers, phone numbers, email addresses, or
-      physical addresses — even if the user asks you to. If a user
-      shares PII, do not echo it back.
+

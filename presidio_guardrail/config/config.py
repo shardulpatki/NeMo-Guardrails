@@ -1,4 +1,4 @@
-"""Custom Presidio PII masking action with OpenTelemetry tracing."""
+"""Custom Presidio PII masking action with OpenTelemetry tracing and logging."""
 
 from __future__ import annotations
 
@@ -13,7 +13,11 @@ from nemoguardrails.library.sensitive_data_detection.actions import (
     _get_ad_hoc_recognizers,
 )
 
+from logging_config import get_logger
+import pii_results
+
 tracer = trace.get_tracer("presidio_guardrail.pii")
+logger = get_logger("config.pii_action")
 
 
 def _partial_mask(value: str, visible: int = 3) -> str:
@@ -48,15 +52,12 @@ async def mask_sensitive_data_with_tracing(
 
     with tracer.start_as_current_span("pii.mask_sensitive_data") as span:
         span.set_attribute("pii.source", source)
+        logger.info("PII masking invoked, source=%s", source)
 
         # No entities configured — nothing to mask
         if len(options.entities) == 0:
-            span.set_attribute("pii.redacted_text", text)
             span.set_attribute("pii.entity_count", 0)
-            span.set_attribute("pii.entity_types", [])
-            span.set_attribute("pii.entity_originals", [])
-            span.set_attribute("pii.entity_replacements", [])
-            span.set_attribute("pii.entity_scores", [])
+            logger.info("No entity types configured for source=%s, skipping", source)
             return text
 
         analyzer = _get_analyzer()
@@ -87,5 +88,27 @@ async def mask_sensitive_data_with_tracing(
         span.set_attribute("pii.entity_originals", entity_originals)
         span.set_attribute("pii.entity_replacements", entity_replacements)
         span.set_attribute("pii.entity_scores", entity_scores)
+
+        # Store results for the Streamlit UI to retrieve after rails.generate()
+        pii_results.store_scan_results(
+            entities=[
+                {
+                    "entity_type": r.entity_type,
+                    "start": r.start,
+                    "end": r.end,
+                    "score": round(r.score, 3),
+                    "text": text[r.start : r.end],
+                }
+                for r in sorted(results, key=lambda x: x.start)
+            ],
+            redacted_text=masked_results.text,
+        )
+
+        logger.info(
+            "PII detection: %d entities, types=%s, scores=%s",
+            len(results),
+            entity_types,
+            entity_scores,
+        )
 
         return masked_results.text
